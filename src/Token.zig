@@ -17,6 +17,7 @@ value: TokenValue = undefined,
 pub const Kind = enum {
     Skip, // Whitespace
     Eof, // End of File
+    Comment, //--
     // Values
     Identifier, // eg. local name
     Numeral, // int          ^^^^

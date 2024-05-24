@@ -64,6 +64,35 @@ pub fn match_string(self: *Lexer, quote_type: u8) Kind {
     return Kind.String;
 }
 
+pub fn match_numeral(self: *Lexer) Kind {
+    var end: usize = self.chars.index;
+    for (self.chars.bytes[self.chars.index..]) |char| {
+        switch (char) {
+            '0'...'9' => {
+                end += 1;
+            },
+            else => break,
+        }
+    }
+    const slice = self.chars.bytes[self.chars.index - 1 .. end];
+    self.chars.take(slice.len - 1);
+
+    return Kind.Numeral;
+}
+
+fn match_comment(self: *Lexer) Kind {
+    const start: usize = self.chars.index;
+    var end: usize = start;
+    for (self.chars.bytes[self.chars.index..]) |char| {
+        switch (char) {
+            '\n' => break,
+            else => end += 1,
+        }
+    }
+    self.chars.take(end - 1);
+    return Kind.Comment;
+}
+
 pub fn read_next_kind(self: *Lexer) Kind {
     while (self.chars.next()) |char| {
         return switch (char) {
@@ -72,10 +101,14 @@ pub fn read_next_kind(self: *Lexer) Kind {
             },
             '"' => self.match_string('"'),
             '\'' => self.match_string('\''),
-            // TODO: Handle numbers (same as string)
-            '0'...'9' => Kind.Numeral,
+            '0'...'9' => self.match_numeral(),
             '+' => Kind.Plus,
-            '-' => Kind.Subtract,
+            '-' => {
+                if (self.peek() == '-') {
+                    return self.match_comment();
+                }
+                return Kind.Subtract;
+            },
             '*' => Kind.Multiply,
             '/' => divide: {
                 switch (self.peek()) {
@@ -192,9 +225,13 @@ pub fn parse_value(self: *Lexer, kind: Kind, start: usize, end: usize) TokenValu
         },
         .True => TokenValue{ .boolean = true },
         .False => TokenValue{ .boolean = false },
-        .Numeral => TokenValue{
-            // TODO: Parse to a number
-            .number = 0,
+        .Numeral => {
+            const slice = self.chars.bytes[start..end];
+            const value = std.fmt.parseFloat(f64, slice) catch 0;
+            return TokenValue{
+                // TODO: Parse to a number
+                .number = value,
+            };
         },
         .Identifier => TokenValue{
             .string = self.chars.bytes[start..end],
@@ -424,4 +461,28 @@ test "handles strings" {
     try testing.expect(empty.start == 16);
     try testing.expect(empty.end == 18);
     try testing.expect(empty.value.string.len == 0);
+}
+
+test "handles numbers" {
+    const input = "1 + 41";
+    var lexer = Lexer.init(input);
+    const one = lexer.advance().?;
+    try testing.expectEqual(one.kind, Kind.Numeral);
+    try testing.expectEqual(one.start, 0);
+    try testing.expectEqual(one.end, 1);
+    try testing.expectEqual(one.value.number, 1);
+    _ = lexer.advance().?;
+    _ = lexer.advance().?;
+    _ = lexer.advance().?;
+    const forty_one = lexer.advance().?;
+    try testing.expectEqual(forty_one.kind, Kind.Numeral);
+    try testing.expectEqual(forty_one.start, 4);
+    try testing.expectEqual(forty_one.end, 6);
+    try testing.expectEqual(forty_one.value.number, 41);
+}
+
+test "handles comments" {
+    const input = "-- Commented out";
+    var lexer = Lexer.init(input);
+    try testing.expectEqual(Token{ .kind = Kind.Comment, .start = 0, .end = 16 }, lexer.advance().?);
 }
